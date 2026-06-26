@@ -436,25 +436,26 @@ M.run_command = function(cmd, opts)
                 return
             end
             if opts.debug then vim.print('Response data: ', data) end
-            for _, line in ipairs(data) do
-                partial_data = partial_data .. line
-                if line:sub(-1) == "}" then
-                    partial_data = partial_data .. "\n"
+
+            -- Neovim splits channel stdout on "\n": data[1] continues the
+            -- previous partial line, each later element starts a new line, and
+            -- the final element is itself partial (no terminating "\n" yet). A
+            -- lone {''} signals EOF. Only hand a line to the JSON parser once a
+            -- newline has followed it -- otherwise a "}" inside the streamed
+            -- content is mistaken for a record boundary, which splits the JSON
+            -- object and truncates (or drops) the response.
+            if #data == 1 and data[1] == "" then
+                if partial_data ~= "" then
+                    Process_response(partial_data, opts.json_response)
+                    partial_data = ""
                 end
+                return
             end
 
-            local lines = vim.split(partial_data, "\n", {trimempty = true})
-
-            partial_data = table.remove(lines) or ""
-
-            for _, line in ipairs(lines) do
-                Process_response(line, globals.job_id, opts.json_response)
-            end
-
-            if partial_data:sub(-1) == "}" then
-                Process_response(partial_data, globals.job_id,
-                                 opts.json_response)
-                partial_data = ""
+            partial_data = partial_data .. data[1]
+            for i = 2, #data do
+                Process_response(partial_data, opts.json_response)
+                partial_data = data[i]
             end
         end,
         on_stderr = function(_, data, _)
