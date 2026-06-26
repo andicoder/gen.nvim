@@ -107,11 +107,22 @@ local function close_window(opts)
         lines = vim.split(globals.result_string, "\n", {trimempty = true})
     end
     lines = trim_table(lines)
-    vim.api.nvim_buf_set_text(globals.curr_buffer, globals.start_pos[2] - 1,
-                              globals.start_pos[3] - 1, globals.end_pos[2] - 1,
-                              globals.end_pos[3] > globals.start_pos[3] and
-                                  globals.end_pos[3] or globals.end_pos[3] - 1,
-                              lines)
+    local start_row = globals.start_pos[2] - 1
+    local end_row = globals.end_pos[2] - 1
+    local end_col = globals.end_pos[3] > globals.start_pos[3] and
+                        globals.end_pos[3] or globals.end_pos[3] - 1
+    -- A linewise (`V`) selection reports its end column as v:maxcol, and even a
+    -- charwise selection can sit one past the line end; clamp both columns to
+    -- the real byte length of their lines so nvim_buf_set_text never gets an
+    -- out-of-range column.
+    local function clamp_col(row, col)
+        local line = vim.api.nvim_buf_get_lines(globals.curr_buffer, row,
+                                                row + 1, false)[1] or ""
+        return math.max(0, math.min(col, #line))
+    end
+    vim.api.nvim_buf_set_text(globals.curr_buffer, start_row,
+                              clamp_col(start_row, globals.start_pos[3] - 1),
+                              end_row, clamp_col(end_row, end_col), lines)
     -- in case another replacement happens
     globals.end_pos[2] = globals.start_pos[2] + #lines - 1
     globals.end_pos[3] = string.len(lines[#lines])
