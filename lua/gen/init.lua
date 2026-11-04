@@ -109,8 +109,11 @@ local function close_window(opts)
     lines = trim_table(lines)
     local start_row = globals.start_pos[2] - 1
     local end_row = globals.end_pos[2] - 1
-    local end_col = globals.end_pos[3] > globals.start_pos[3] and
-                        globals.end_pos[3] or globals.end_pos[3] - 1
+    -- Without a selection start_pos and end_pos are the same table, and the
+    -- empty range inserts at the cursor. A selection's end column is inclusive
+    -- and 1-based, which is the exclusive 0-based column set_text wants.
+    local end_col = globals.start_pos == globals.end_pos and
+                        globals.end_pos[3] - 1 or globals.end_pos[3]
     -- A linewise (`V`) selection reports its end column as v:maxcol, and even a
     -- charwise selection can sit one past the line end; clamp both columns to
     -- the real byte length of their lines so nvim_buf_set_text never gets an
