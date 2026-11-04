@@ -52,7 +52,7 @@ local default_options = {
     retry_map = "<c-r>",
     hidden = false,
     command = function(options)
-        return "curl -q --silent --no-buffer -X POST http://" .. options.host ..
+        return "curl -q --silent --show-error --no-buffer -X POST http://" .. options.host ..
                    ":" .. options.port .. "/api/chat -d $body"
     end,
     json_response = true,
@@ -203,6 +203,11 @@ local function write_to_buffer(lines)
 
     vim.api.nvim_set_option_value("modifiable", false,
                                   {buf = globals.result_buffer})
+end
+
+local function show_error(message)
+    globals.failed = true
+    write_to_buffer({"", "====== ERROR ====", message, "-------------", ""})
 end
 
 local function create_window(cmd, opts)
@@ -431,6 +436,8 @@ M.run_command = function(cmd, opts)
         end
     end
     local partial_data = ""
+    local stderr = {}
+    globals.failed = false
     if opts.debug then print(cmd) end
 
     globals.job_id = vim.fn.jobstart(cmd, {
@@ -473,6 +480,7 @@ M.run_command = function(cmd, opts)
             end
         end,
         on_stderr = function(_, data, _)
+            vim.list_extend(stderr, data)
             if opts.debug then
                 -- window was closed, so cancel the job
                 if not globals.float_win or
@@ -491,8 +499,18 @@ M.run_command = function(cmd, opts)
                 write_to_buffer(lines)
             end
         end,
-        on_exit = function(_, b)
-            if b == 0 and opts.replace and globals.result_buffer then
+        on_exit = function(job, code)
+            -- A retry has already started another job, or the job was stopped
+            -- on purpose (exit code 128 + signal).
+            if job ~= globals.job_id or code > 128 or globals.failed then
+                return
+            end
+            if code ~= 0 then
+                show_error(vim.trim("Command failed with exit code " .. code ..
+                                        "\n" .. table.concat(stderr, "\n")))
+            elseif globals.result_string:match("^%s*$") then
+                show_error("The model returned an empty answer.")
+            elseif opts.replace and globals.result_buffer then
                 close_window(opts)
             end
         end
@@ -602,6 +620,11 @@ function Process_response(str, json_response)
         end)
 
         if success then
+            if result.error then
+                show_error(tostring(result.error))
+                vim.fn.jobstop(globals.job_id)
+                return
+            end
             if result.message and result.message.content then -- ollama chat endpoint
                 local content = result.message.content
                 text = content
@@ -651,7 +674,7 @@ function Process_response(str, json_response)
                 end
             end
         else
-            write_to_buffer({"", "====== ERROR ====", str, "-------------", ""})
+            show_error(str)
             vim.fn.jobstop(globals.job_id)
         end
     else
